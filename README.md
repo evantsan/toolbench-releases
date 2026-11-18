@@ -94,7 +94,11 @@ Toolbench processes every file on your computer. It has no accounts, analytics, 
 
 This repository only hosts Toolbench's Windows installers and release notes. The source code is developed privately. Each release is published here automatically after it passes the desktop self-test.
 
+## License
+
+Toolbench is free to use under its [end-user license](LICENSE) and the Terms of Use in the app. It's proprietary software, not open source. It includes open-source components under their own licenses, listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md); the build files for the LGPL FFmpeg core are in [`source/ffmpeg-lgpl`](source/ffmpeg-lgpl/README.md).
+
 <div align="center">
 <br>
-<sub>© 2026 Evan Tsan. All rights reserved. Toolbench is free to use under its <b>terms of use</b> (in the app, under Settings → About). Open-source components remain under their own licenses, listed in the app.</sub>
+<sub>© 2026 Evan Tsan. All rights reserved.</sub>
 </div>

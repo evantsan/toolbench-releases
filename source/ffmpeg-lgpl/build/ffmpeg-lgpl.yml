@@ -1,0 +1,80 @@
+name: ffmpeg.wasm (LGPL build)
+
+# Builds the LGPL-only ffmpeg.wasm core from vendor-src/ffmpeg-lgpl/build (upstream
+# ffmpeg.wasm v12.15, the source of npm @ffmpeg/core 0.12.10, minus x264, x265, libpostproc and unused libraries). Run it by hand;
+# commit the artifact to vendor-src/ffmpeg-lgpl/<variant>/ and update BUILD.md
+# (DECISIONS 2026-11-15). Only `st` ships today; `mt` is here so it can be built later.
+on:
+  workflow_dispatch:
+    inputs:
+      variant:
+        description: Core variant
+        type: choice
+        options: [st, mt]
+        default: st
+  # any change to the build files rebuilds (and re-checks) the shipped variant
+  push:
+    paths:
+      - vendor-src/ffmpeg-lgpl/build/**
+      - .github/workflows/ffmpeg-lgpl.yml
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_TAG: v12.15
+  UPSTREAM_SHA: 71aa99d37c02a7b4c435275ca9ef50e612f6efa1
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch upstream ffmpeg.wasm at a pinned commit
+        run: |
+          git clone --depth 1 --branch "$UPSTREAM_TAG" https://github.com/ffmpegwasm/ffmpeg.wasm upstream
+          test "$(git -C upstream rev-parse HEAD)" = "$UPSTREAM_SHA"
+      - name: Use the LGPL build files
+        run: |
+          cp vendor-src/ffmpeg-lgpl/build/Dockerfile upstream/Dockerfile
+          cp vendor-src/ffmpeg-lgpl/build/ffmpeg-wasm.sh upstream/build/ffmpeg-wasm.sh
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build (${{ inputs.variant || 'st' }})
+        working-directory: upstream
+        env:
+          VARIANT: ${{ inputs.variant || 'st' }}
+        run: |
+          # same flags as upstream's `make prd` / `make prd-mt`
+          if [ "$VARIANT" = mt ]; then
+            args=(--build-arg FFMPEG_MT=yes --build-arg "EXTRA_CFLAGS=-O3 -msimd128 -sUSE_PTHREADS -pthread")
+          else
+            args=(--build-arg FFMPEG_ST=yes --build-arg "EXTRA_CFLAGS=-O3 -msimd128")
+          fi
+          docker buildx build --progress=plain "${args[@]}" -o ../out .
+      - name: Check the license of what was built
+        run: |
+          wasm=out/dist/esm/ffmpeg-core.wasm
+          # FFmpeg embeds its configure line in the binary
+          strings -n 8 "$wasm" | grep -m1 -- '--target-os=none' > out/configure.txt
+          cat out/configure.txt
+          if grep -Eq -- '--enable-(gpl|nonfree|version3|libx264|libx265|postproc)' out/configure.txt; then
+            echo "::error::GPL/nonfree component in the configure line"; exit 1
+          fi
+          # Strings only GPL code carries: x264's banner, x265's build string, and the
+          # descriptions of libavfilter's GPL-only postprocessing filters. Not "x264 - core" or
+          # "libpostproc": FFmpeg's LGPL H.264 decoder parses x264's SEI tag, and fftools' version
+          # printer names every library, built or not.
+          gpl='H\.264/MPEG-4 AVC codec - Copy|x265 \(build|Filter video using libpostproc|Apply Postprocessing 7 filter|Apply a simple post processing filter'
+          if strings -n 6 "$wasm" | grep -E "$gpl"; then
+            echo "::error::GPL library code found in the binary (lines above)"; exit 1
+          fi
+          (cd out/dist/esm && sha256sum ffmpeg-core.js ffmpeg-core.wasm ${{ (inputs.variant || 'st') == 'mt' && 'ffmpeg-core.worker.js' || '' }}) | tee out/SHA256SUMS
+          echo "run_id=${{ github.run_id }}" >> out/configure.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-lgpl-${{ inputs.variant || 'st' }}
+          path: |
+            out/dist/esm/
+            out/configure.txt
+            out/SHA256SUMS
